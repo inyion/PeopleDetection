@@ -302,7 +302,7 @@ class Tflite:
 
     @staticmethod
     def model_input_output_attributes(
-            interpreter_object: tflite.Interpreter,
+        interpreter_object: tflite.Interpreter,
     ) -> Tuple[input_attribute, output_attribute]:
         inputs = {}
         outputs = {}
@@ -346,9 +346,7 @@ class Tflite:
 
 
 class Basemodel(metaclass=abc.ABCMeta):
-    @classmethod
-    def initialize(cls, **kwargs) -> None:
-        Tflite.model_initialize(cls=cls, **kwargs)
+    """Todo"""
 
     def __new__(cls):
         if is_init(cls) is False:
@@ -370,13 +368,17 @@ class Basemodel(metaclass=abc.ABCMeta):
 
     @classmethod
     def initialize(cls, **kwargs) -> None:
-        """Todo"""
-        Tflite.model_initialize(cls=cls, **kwargs)
+        Tflite.model_initialize(cls=cls, file="model.tflite")
+        cls.initialized = True
 
     @classmethod
     def finalize(cls, **kwargs) -> None:
-        """Todo"""
         model_finalize(cls=cls, **kwargs)
+        cls.initialized = False
+
+    @classmethod
+    def is_model_initialized(cls) -> bool:
+        return cls.initialized
 
     def preprocess(self, input_data: Union[str, Any]) -> Dict[Union[str, int], numpy.ndarray]:
         if isinstance(input_data, str) is True:
@@ -387,8 +389,13 @@ class Basemodel(metaclass=abc.ABCMeta):
     def postprocess(self, inference_result: numpy.ndarray) -> Any:
         return inference_result
 
-    def run(self, input_data: Any, **kwargs):
-        pre_result = self.preprocess(input_data)
+    def run(self, data: Any, **kwargs):
+        input_data = data.get("image")
+        height = data.get("height")
+        width = data.get("width")
+        channels = data.get("channels")  # 기본값은 4 (ARGB)
+        image = np.frombuffer(input_data.copy(), dtype=np.uint8).reshape((height, width, channels))
+        pre_result = self.preprocess(image)
         inference_result = Tflite.model_inference(cls=self.__class__, preprocess_result=pre_result)
         post_result = self.postprocess(inference_result)
         return post_result
@@ -396,8 +403,12 @@ class Basemodel(metaclass=abc.ABCMeta):
 
 class PeopleDetectionModel(Basemodel):
 
+    initialized = False
+
     def __init__(self):
-        self.classes = ['Person']
+        self.classes = [
+            'Person'
+        ]
         self.conf_thres = 0.25
         self.iou_thres = 0.45
         self.anchor = [[[[[[12.0, 18.0]]],[[[37.0, 49.0]]],[[[52.0, 132.0]]]]],[[[[[115.0, 73.0]]],[[[119.0, 199.0]]],[[[242.0, 238.0]]]]]]
@@ -414,20 +425,39 @@ class PeopleDetectionModel(Basemodel):
     def preprocess(self, image) -> Dict[int, np.ndarray]:
         preprocessed_data = {}
 
-        # **수정된 부분: 이미지가 None인지 확인**
-        if image is None:
-            raise ValueError("Failed to load image. Please check the file path or the file itself.")
-
         for key in self.input_layer:
             input_attribute = self.inputs.get(key)
             self.input_size = [input_attribute.height, input_attribute.width]
-
-            origin_h, origin_w, origin_c = image.shape  # 여기서 오류가 발생할 수 있음
+            origin_h, origin_w, origin_c = image.shape
             self.origin_h, self.origin_w = origin_h, origin_w
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-            # 기존 이미지 전처리 로직들...
-
+            # Calculate width and height and paddings
+            r_w = self.input_size[1] / origin_w
+            r_h = self.input_size[0] / origin_h
+            if r_h > r_w:
+                tw = self.input_size[1]
+                th = int(r_w *  origin_h)
+                tx1 = tx2 = 0
+                ty1 = int((self.input_size[0] - th) / 2)
+                ty2 = self.input_size[0] - th - ty1
+            else:
+                tw = int(r_h * origin_w)
+                th = self.input_size[0]
+                tx1 = int((self.input_size[1] - tw) / 2)
+                tx2 = self.input_size[1] - tw - tx1
+                ty1 = ty2 = 0
+            image = cv2.resize(image, (tw, th))
+            # Pad the short side with (128,128,128)
+            image = cv2.copyMakeBorder(
+                image, ty1, ty2, tx1, tx2, cv2.BORDER_CONSTANT, value=(114, 114, 114)
+            )
+            image = image.astype(np.float32)
+            # Normalize to [0,1]
+            image /= 255.0
+            # HWC to NHWC format
+            image = np.expand_dims(image, axis=0)
+            # Convert the image to row-major order:
+            data = np.ascontiguousarray(image)
             if input_attribute.format == 'nchw':
                 data = data.transpose(0,3,1,2)
             preprocessed_data[key] = data
@@ -574,7 +604,7 @@ class PeopleDetectionModel(Basemodel):
     def print_result(self, result_label):
         print("--------------------------------------------------------------")
         if result_label is None or len(result_label) == 0:
-            print(' - Nothing Detected!')
+                print(' - Nothing Detected!')
         else:
             for i, label in enumerate(result_label):
                 detected = str(self.classes[int(label[5])])
@@ -587,12 +617,8 @@ class PeopleDetectionModel(Basemodel):
         print("--------------------------------------------------------------\n")
 
 
-PeopleDetectionModel.initialize(framework="tflite", file="model.tflite")
-k = PeopleDetectionModel()
-image = cv2.imread("example.jpg")
-# **이미지 로드 성공 여부 확인 추가**
-if image is None:
-    print("Error: Image could not be loaded. Check if the file path is correct.")
-else:
-    k.run(image)
-PeopleDetectionModel.finalize()
+# PeopleDetectionModel.initialize(framework="tflite", file="model.tflite")
+# k = PeopleDetectionModel()
+# image = cv2.imread("example.jpg")
+# k.run(image)
+# PeopleDetectionModel.finalize()

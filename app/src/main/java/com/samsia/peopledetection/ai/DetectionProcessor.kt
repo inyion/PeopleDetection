@@ -20,24 +20,26 @@ class DetectionProcessor(var frameWidth: Int, var frameHeight: Int) {
         )
         val strides = arrayOf(16f, 32f)
 
-        for (anchorIndex in outputArray[0].indices) {
-            val stride = strides[anchorIndex / 3]
-            for (y in outputArray[0][anchorIndex].indices) {
-                for (x in outputArray[0][anchorIndex][y].indices) {
-                    val data = outputArray[0][anchorIndex][y][x]
-                    val confidence = sigmoid(data[4])
-                    if (confidence > confidenceThreshold) {
-                        val cx = (sigmoid(data[0]) + x) * stride
-                        val cy = (sigmoid(data[1]) + y) * stride
-                        val w = exp(data[2]) * anchors[anchorIndex][0]
-                        val h = exp(data[3]) * anchors[anchorIndex][1]
+        for (output in outputArray) {
+            for (anchorIndex in output.indices) {
+                val stride = strides[anchorIndex / 3]
+                for (y in outputArray[0][anchorIndex].indices) {
+                    for (x in outputArray[0][anchorIndex][y].indices) {
+                        val data = outputArray[0][anchorIndex][y][x]
+                        val confidence = sigmoid(data[4])
+                        if (confidence > confidenceThreshold) {
+                            val cx = (sigmoid(data[0]) + x) * stride
+                            val cy = (sigmoid(data[1]) + y) * stride
+                            val w = exp(data[2]) * anchors[anchorIndex][0]
+                            val h = exp(data[3]) * anchors[anchorIndex][1]
 
-                        val left = (cx - w / 2) / modelInputSize
-                        val top = (cy - h / 2) / modelInputSize
-                        val right = (cx + w / 2) / modelInputSize
-                        val bottom = (cy + h / 2) / modelInputSize
+                            val left = (cx - w / 2) / modelInputSize
+                            val top = (cy - h / 2) / modelInputSize
+                            val right = (cx + w / 2) / modelInputSize
+                            val bottom = (cy + h / 2) / modelInputSize
 
-                        boundingBoxes.add(floatArrayOf(left, top, right, bottom, confidence, 0f))
+                            boundingBoxes.add(floatArrayOf(left, top, right, bottom, confidence, 0f))
+                        }
                     }
                 }
             }

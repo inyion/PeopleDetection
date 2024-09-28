@@ -46,6 +46,7 @@ import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import com.samsia.peopledetection.ai.DetectionProcessor
 import com.samsia.peopledetection.ai.model.PeopleDetectionModel
+import com.samsia.peopledetection.ai.model.PeopleDetectionModelForPython
 import com.samsia.peopledetection.image.ImageUtil.yuv420ToBitmap
 import com.samsia.peopledetection.ui.theme.PeopleDetectionTheme
 import kotlinx.coroutines.Dispatchers
@@ -53,18 +54,17 @@ import kotlinx.coroutines.launch
 
 @ExperimentalGetImage
 class MainActivity : ComponentActivity() {
-    private var peopleDetectionModel: PeopleDetectionModel? = null
+//    private var peopleDetectionModel: PeopleDetectionModel? = null
+    private var peopleDetectionModel: PeopleDetectionModelForPython? = null
     private var isModelInitialized = mutableStateOf(false)
     private var detectionProcessor: DetectionProcessor? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (!Python.isStarted()) {
-            Python.start(AndroidPlatform(this))
-        }
 
         lifecycleScope.launch(Dispatchers.Default) {
-            peopleDetectionModel = PeopleDetectionModel(applicationContext, modelInputSize, "model.tflite")
+//            peopleDetectionModel = PeopleDetectionModel(applicationContext, modelInputSize, "model.tflite")
+            peopleDetectionModel = PeopleDetectionModelForPython(applicationContext)
             isModelInitialized.value = true
         }
 
@@ -104,7 +104,7 @@ class MainActivity : ComponentActivity() {
 
     @ExperimentalGetImage
     @Composable
-    fun CameraPreview(peopleDetectionModel: PeopleDetectionModel) {
+    fun CameraPreview(peopleDetectionModel: PeopleDetectionModelForPython) {
         val context = LocalContext.current
         val lifecycleOwner = LocalLifecycleOwner.current
         var bitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -142,10 +142,13 @@ class MainActivity : ComponentActivity() {
                         bitmap = rotatedBitmap
 
                         (lifecycleOwner as? ComponentActivity)?.lifecycleScope?.launch(Dispatchers.Default) {
-                            val outputArray = peopleDetectionModel.detectObjects(rotatedBitmap)
-                            detectionProcessor?.processDetectionResults(outputArray)?.let {
+                            peopleDetectionModel.processImage(rotatedBitmap)?.let {
                                 detectionResults = it
                             }
+//                            val outputArray = peopleDetectionModel.detectObjects(rotatedBitmap)
+//                            detectionProcessor?.processDetectionResults(outputArray)?.let {
+//                                detectionResults = it
+//                            }
 
                         }
                     } else {
@@ -185,7 +188,8 @@ class MainActivity : ComponentActivity() {
                     contentScale = ContentScale.Crop
                 )
                 Canvas(modifier = Modifier.fillMaxSize()) {
-                    drawBoundingBoxes(detectionResults, btm.width, btm.height)
+//                    drawBoundingBoxes(detectionResults, btm.width, btm.height)
+                    drawBoundingBoxesForPython(detectionResults, btm.width, btm.height)
                 }
             }
         }
@@ -212,92 +216,73 @@ class MainActivity : ComponentActivity() {
 
             Log.d("DrawBoundingBoxes", "Drawing box $index: left=$left, top=$top, right=$right, bottom=$bottom, confidence=$confidence")
 
-            drawRect(
-                color = Color.Red,
-                topLeft = Offset(left, top),
-                size = Size(right - left, bottom - top),
-                style = Stroke(width = 2f)
-            )
-
-            drawContext.canvas.nativeCanvas.apply {
-                val text = "Person %.2f".format(confidence)
-                drawText(
-                    text,
-                    left,
-                    top - 10f,
-                    android.graphics.Paint().apply {
-                        color = android.graphics.Color.RED
-                        textSize = 30f
-                        isFakeBoldText = true
-                    }
+            if (confidence >= 0.5) {
+                drawRect(
+                    color = Color.Red,
+                    topLeft = Offset(left, top),
+                    size = Size(right - left, bottom - top),
+                    style = Stroke(width = 2f)
                 )
+
+                drawContext.canvas.nativeCanvas.apply {
+                    val text = "Person %.2f".format(confidence)
+                    drawText(
+                        text,
+                        left,
+                        top - 10f,
+                        android.graphics.Paint().apply {
+                            color = android.graphics.Color.RED
+                            textSize = 30f
+                            isFakeBoldText = true
+                        }
+                    )
+                }
             }
         }
     }
 
-//    fun processDetectionResults(outputArray: Array<Array<Array<Array<FloatArray>>>>): List<FloatArray> {
-//        val boundingBoxes = mutableListOf<FloatArray>()
-//        val confidenceThreshold = 0.7f
-//        val anchors = arrayOf(
-//            arrayOf(12f, 18f), arrayOf(37f, 49f), arrayOf(52f, 132f),
-//            arrayOf(115f, 73f), arrayOf(119f, 199f), arrayOf(242f, 238f)
-//        )
-//        val strides = arrayOf(16f, 32f)
-//
-//        for (anchorIndex in outputArray[0].indices) {
-//            val stride = strides[anchorIndex / 3]
-//            for (y in outputArray[0][anchorIndex].indices) {
-//                for (x in outputArray[0][anchorIndex][y].indices) {
-//                    val data = outputArray[0][anchorIndex][y][x]
-//                    val confidence = sigmoid(data[4])
-//                    if (confidence > confidenceThreshold) {
-//                        val cx = (sigmoid(data[0]) + x) * stride
-//                        val cy = (sigmoid(data[1]) + y) * stride
-//                        val w = exp(data[2]) * anchors[anchorIndex][0]
-//                        val h = exp(data[3]) * anchors[anchorIndex][1]
-//
-//                        val left = (cx - w / 2) / modelInputSize
-//                        val top = (cy - h / 2) / modelInputSize
-//                        val right = (cx + w / 2) / modelInputSize
-//                        val bottom = (cy + h / 2) / modelInputSize
-//
-//                        val (limitedLeft, limitedTop, limitedRight, limitedBottom) = limitBoxSize(left, top, right, bottom)
-//                        boundingBoxes.add(floatArrayOf(limitedLeft, limitedTop, limitedRight, limitedBottom, confidence, 0f))
-//                    }
-//                }
-//            }
-//        }
-//
-//        Log.d("ObjectDetection", "Number of detections before NMS: ${boundingBoxes.size}")
-//        val nmsResults = applyNMS(boundingBoxes)
-//        Log.d("ObjectDetection", "Number of detections after NMS: ${nmsResults.size}")
-//        val smoothedResults = detectionSmoother.smooth(nmsResults)
-//        Log.d("ObjectDetection", "Number of detections after smoothing: ${smoothedResults.size}")
-//
-//        return smoothedResults
-//    }
-//
-//    fun limitBoxSize(left: Float, top: Float, right: Float, bottom: Float): FloatArray {
-//        val maxWidth = 0.8f // 이미지 너비의 80%
-//        val maxHeight = 0.8f // 이미지 높이의 80%
-//
-//        val width = right - left
-//        val height = bottom - top
-//
-//        val newWidth = minOf(width, maxWidth)
-//        val newHeight = minOf(height, maxHeight)
-//
-//        val centerX = (left + right) / 2
-//        val centerY = (top + bottom) / 2
-//
-//        val newLeft = maxOf(0f, centerX - newWidth / 2)
-//        val newTop = maxOf(0f, centerY - newHeight / 2)
-//        val newRight = minOf(1f, newLeft + newWidth)
-//        val newBottom = minOf(1f, newTop + newHeight)
-//
-//        return floatArrayOf(newLeft, newTop, newRight, newBottom)
-//    }
+    fun DrawScope.drawBoundingBoxesForPython(results: List<FloatArray>, imageWidth: Int, imageHeight: Int) {
+        val scaleX = size.width / imageWidth
+        val scaleY = size.height / imageHeight
 
+        results.forEachIndexed { index, result ->
+            val left = result[0] * scaleX
+            val top = result[1] * scaleY
+            val right = result[2] * scaleX
+            val bottom = result[3] * scaleY
+            val confidence = result[4]
+
+            if (confidence >= 0.5) { // Confidence threshold for drawing
+                // Drawing the bounding box
+                drawRect(
+                    color = Color.Red,
+                    topLeft = Offset(left, top),
+                    size = Size(right - left, bottom - top),
+                    style = Stroke(width = 2f)
+                )
+
+                // Drawing the confidence text
+                drawContext.canvas.nativeCanvas.apply {
+                    val text = "Person %.2f".format(confidence)
+                    drawText(
+                        text,
+                        left,
+                        top - 10f,
+                        android.graphics.Paint().apply {
+                            color = android.graphics.Color.RED
+                            textSize = 30f
+                            isFakeBoldText = true
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        peopleDetectionModel?.finalize()
+    }
 
 
     companion object {
